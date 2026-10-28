@@ -5,6 +5,7 @@ go 1.24.7
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/redis/go-redis/v9 v9.17.0
 	gopkg.in/yaml.v3 v3.0.1
 )
