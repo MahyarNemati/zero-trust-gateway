@@ -1,0 +1,11 @@
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+.env
+*.pem
+!testdata/**/*.pem
+.idea/
+.vscode/
+.DS_Store
