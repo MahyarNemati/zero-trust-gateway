@@ -1,0 +1,83 @@
+# Per-route access policy for the gateway.
+#
+# Routes are evaluated in order and the FIRST match wins, so put the most
+# specific rules first. A request matching nothing falls through to `default`.
+#
+# Validate without starting the gateway:
+#   gateway -check
+
+# "deny" (default) or "authenticated". Prefer deny: with "authenticated", a
+# route you forget to list is reachable by anyone who can log in.
+default: deny
+
+routes:
+  # ---- anonymous ----
+  - name: health
+    match:
+      paths: ["/healthz", "/readyz"]
+      methods: ["GET"]
+    allow_anonymous: true
+
+  - name: static
+    match:
+      paths: ["/static/*", "/favicon.ico"]
+      methods: ["GET", "HEAD"]
+    allow_anonymous: true
+
+  # ---- step-up protected: most specific, so listed before /app/* ----
+  - name: admin
+    match:
+      paths: ["/admin/*"]
+    require:
+      groups_all: ["staff", "platform-admins"]
+      email_domains: ["example.com"]
+      # Requires a passkey verification within step_up_max_age, even though
+      # the session is already authenticated.
+      step_up:         true
+      step_up_max_age: 10m
+
+  - name: billing-writes
+    match:
+      paths: ["/app/billing/*"]
+      methods: ["POST", "PUT", "PATCH", "DELETE"]
+    require:
+      groups_any: ["finance", "platform-admins"]
+      step_up: true
+
+  # ---- ordinary authenticated access ----
+  - name: api
+    match:
+      hosts: ["api.example.com"]
+      paths: ["/v1/*"]
+    require:
+      groups_any: ["staff", "partners"]
+      claims:
+        # A scalar claim must equal one of the values; a list claim must
+        # contain one of them.
+        tenant: ["acme", "globex"]
+        # A single value may be written as a scalar.
+        email_verified: true
+
+  - name: app
+    match:
+      paths: ["/app/*"]
+    require:
+      groups_any: ["staff"]
+
+  - name: webhooks
+    match:
+      paths: ["/webhooks/*"]
+      methods: ["POST"]
+      # path_regex is available when globs are not enough. Anchored
+      # automatically; keep it cheap.
+      path_regex: '^/webhooks/[a-z0-9-]{3,40}$'
+    # Webhook senders cannot log in. Allow them through the gateway and
+    # authenticate the signature in the upstream.
+    allow_anonymous: true
+
+  # Everything else under the root requires a staff session.
+  - name: default-authenticated
+    match:
+      paths: ["/*"]
+    require:
+      groups_any: ["staff"]

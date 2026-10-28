@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+
+      - run: go vet ./...
+      - run: go build ./...
+
+      - name: Test (race)
+        env:
+          CGO_ENABLED: 1   # the race detector needs cgo
+        run: go test -race -count=1 ./...
+
+      # The shipped policy is documentation people copy. If a schema change
+      # breaks it, that should fail here rather than in someone's cluster.
+      - name: Validate the example policy
+        env:
+          ZT_PUBLIC_URL: https://app.example.com
+          ZT_UPSTREAM_URL: http://127.0.0.1:3000
+          ZT_POLICY_FILE: policy.example.yaml
+          ZT_OIDC_ISSUER: https://id.example.com
+          ZT_OIDC_CLIENT_ID: gateway
+        run: |
+          export ZT_SESSION_SECRET=$(openssl rand -base64 32)
+          go run ./cmd/gateway -check
+
+  redis:
+    name: session store against real redis
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+      # The session tests use miniredis by default, which is its own
+      # implementation; run them against a real server before trusting it.
+      - name: Session and passkey stores
+        env:
+          CGO_ENABLED: 1
+          ZT_TEST_REDIS_URL: redis://localhost:6379/0
+          REDIS_ADDR: localhost:6379
+        run: go test -race -count=1 ./internal/session/... ./internal/passkey/...
+
+  govulncheck:
+    name: vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+      # A gateway that terminates authentication is where a known-vulnerable
+      # dependency matters most.
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  docker:
+    name: image builds and validates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: zero-trust-gateway:ci
+      - name: Config check inside the image
+        run: |
+          docker run --rm \
+            -e ZT_PUBLIC_URL=https://app.example.com \
+            -e ZT_UPSTREAM_URL=http://127.0.0.1:3000 \
+            -e ZT_POLICY_FILE=/policy.yaml \
+            -e ZT_SESSION_SECRET="$(openssl rand -base64 32)" \
+            -e ZT_OIDC_ISSUER=https://id.example.com \
+            -e ZT_OIDC_CLIENT_ID=gateway \
+            -v "$PWD/policy.example.yaml:/policy.yaml:ro" \
+            zero-trust-gateway:ci -check
+
+  tidy:
+    name: go.mod is tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+      - run: go mod tidy
+      - run: git diff --exit-code go.mod go.sum
