@@ -1,6 +1,6 @@
 module github.com/MahyarNemati/zero-trust-gateway
 
-go 1.24.7
+go 1.25.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
@@ -32,7 +32,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 )
